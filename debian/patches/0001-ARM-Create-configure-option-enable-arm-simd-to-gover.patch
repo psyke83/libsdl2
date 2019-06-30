@@ -1,0 +1,193 @@
+From 72a4643c31aeebd29e88161fe59f069c793cee1d Mon Sep 17 00:00:00 2001
+From: Ben Avison <bavison@riscosopen.org>
+Date: Thu, 28 Feb 2019 16:28:20 +0000
+Subject: [PATCH 01/11] ARM: Create configure option --enable-arm-simd to
+ govern assembly optimizations
+
+---
+ configure.in              | 37 +++++++++++++++++++++++++++++++
+ include/SDL_config.h.in   |  1 +
+ include/SDL_cpuinfo.h     |  5 +++++
+ src/cpuinfo/SDL_cpuinfo.c | 55 +++++++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 98 insertions(+)
+
+diff --git a/configure.in b/configure.in
+index ae866ff0c..260b74d96 100644
+--- a/configure.in
++++ b/configure.in
+@@ -1282,6 +1282,42 @@ AC_HELP_STRING([--enable-libsamplerate-shared], [dynamically load libsamplerate
+     fi
+ }
+ 
++dnl Check for ARM instruction support using gas syntax
++CheckARM()
++{
++    AC_ARG_ENABLE(arm-simd,
++AC_HELP_STRING([--enable-arm-simd], [use SIMD assembly blitters on ARM [[default=yes]]]),
++                  enable_arm_simd=$enableval, enable_arm_simd=yes)
++    if test x$enable_video = xyes -a x$enable_assembly = xyes -a x$enable_arm_simd = xyes; then
++        save_CFLAGS="$CFLAGS"
++        have_arm_simd=no
++        CFLAGS="-x assembler-with-cpp $CFLAGS"
++        
++        AC_MSG_CHECKING(for ARM SIMD)
++        AC_COMPILE_IFELSE([AC_LANG_SOURCE([[
++        .text
++        .arch armv6
++        .object_arch armv4
++        .arm
++        .altmacro
++        #ifndef __ARM_EABI__
++        #error EABI is required (to be sure that calling conventions are compatible)
++        #endif
++        pld [r0]
++        uqadd8 r0, r0, r0
++        ]])], have_arm_simd=yes)
++        AC_MSG_RESULT($have_arm_simd)
++        
++        CFLAGS="$save_CFLAGS"
++        
++        if test x$have_arm_simd = xyes; then
++            AC_DEFINE(SDL_ARM_SIMD_BLITTERS)
++dnl            SOURCES="$SOURCES $srcdir/src/video/arm/pixman-arm-simd*.c"
++            SOURCES="$SOURCES $srcdir/src/video/arm/pixman-arm-simd*.S"
++        fi
++    fi
++}
++
+ dnl See if GCC's -fvisibility=hidden is supported (gcc4 and later, usually).
+ dnl  Details of this flag are here: http://gcc.gnu.org/wiki/Visibility
+ CheckVisibilityHidden()
+@@ -3407,6 +3443,7 @@ case "$host" in
+         CheckDiskAudio
+         CheckDummyAudio
+         CheckDLOPEN
++        CheckARM
+         CheckOSS
+         CheckALSA
+         CheckPulseAudio
+diff --git a/include/SDL_config.h.in b/include/SDL_config.h.in
+index 883b6f427..9bfe84b09 100644
+--- a/include/SDL_config.h.in
++++ b/include/SDL_config.h.in
+@@ -407,6 +407,7 @@
+ /* Enable assembly routines */
+ #undef SDL_ASSEMBLY_ROUTINES
+ #undef SDL_ALTIVEC_BLITTERS
++#undef SDL_ARM_SIMD_BLITTERS
+ 
+ /* Enable ime support */
+ #undef SDL_USE_IME
+diff --git a/include/SDL_cpuinfo.h b/include/SDL_cpuinfo.h
+index ee3a47e84..f2633c01c 100644
+--- a/include/SDL_cpuinfo.h
++++ b/include/SDL_cpuinfo.h
+@@ -168,6 +168,11 @@ extern DECLSPEC SDL_bool SDLCALL SDL_HasAVX2(void);
+ extern DECLSPEC SDL_bool SDLCALL SDL_HasAVX512F(void);
+ 
+ /**
++ *  This function returns true if the CPU has ARM SIMD (ARMv6) features.
++ */
++extern DECLSPEC SDL_bool SDLCALL SDL_HasARMSIMD(void);
++
++/**
+  *  This function returns true if the CPU has NEON (ARM SIMD) features.
+  */
+ extern DECLSPEC SDL_bool SDLCALL SDL_HasNEON(void);
+diff --git a/src/cpuinfo/SDL_cpuinfo.c b/src/cpuinfo/SDL_cpuinfo.c
+index 441035883..194fa2022 100644
+--- a/src/cpuinfo/SDL_cpuinfo.c
++++ b/src/cpuinfo/SDL_cpuinfo.c
+@@ -91,6 +91,7 @@
+ #define CPU_HAS_AVX2    (1 << 10)
+ #define CPU_HAS_NEON    (1 << 11)
+ #define CPU_HAS_AVX512F (1 << 12)
++#define CPU_HAS_ARM_SIMD (1 << 13)
+ 
+ #if SDL_ALTIVEC_BLITTERS && HAVE_SETJMP && !__MACOSX__ && !__OpenBSD__
+ /* This is the brute force way of detecting instruction sets...
+@@ -320,6 +321,49 @@ CPU_haveAltiVec(void)
+     return altivec;
+ }
+ 
++#ifdef __linux__
++
++#include <unistd.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <fcntl.h>
++#include <elf.h>
++
++static SDL_bool
++CPU_haveARMSIMD(void)
++{
++    int arm_simd = 0;
++    int fd;
++
++    fd = open("/proc/self/auxv", O_RDONLY);
++    if (fd >= 0)
++    {
++        Elf32_auxv_t aux;
++        while (read(fd, &aux, sizeof aux) == sizeof aux)
++        {
++            if (aux.a_type == AT_PLATFORM)
++            {
++                const char *plat = (const char *) aux.a_un.a_val;
++                arm_simd = strncmp(plat, "v6l", 3) == 0 ||
++                           strncmp(plat, "v7l", 3) == 0;
++            }
++        }
++        close(fd);
++    }
++    return arm_simd;
++}
++
++#else
++
++static SDL_bool
++CPU_haveARMSIMD(void)
++{
++#warning SDL_HasARMSIMD is not implemented for this ARM platform. Write me.
++    return 0;
++}
++
++#endif
++
+ #if (defined(__LINUX__) || defined(__ANDROID__)) && defined(__ARM_ARCH) && !defined(HAVE_GETAUXVAL)
+ static int
+ readProcAuxvForNeon(void)
+@@ -644,6 +688,10 @@ SDL_GetCPUFeatures(void)
+             SDL_CPUFeatures |= CPU_HAS_AVX512F;
+             SDL_SIMDAlignment = SDL_max(SDL_SIMDAlignment, 64);
+         }
++        if (CPU_haveARMSIMD()) {
++            SDL_CPUFeatures |= CPU_HAS_ARM_SIMD;
++            SDL_SIMDAlignment = SDL_max(SDL_SIMDAlignment, 16);
++        }
+         if (CPU_haveNEON()) {
+             SDL_CPUFeatures |= CPU_HAS_NEON;
+             SDL_SIMDAlignment = SDL_max(SDL_SIMDAlignment, 16);
+@@ -726,6 +774,12 @@ SDL_HasAVX512F(void)
+ }
+ 
+ SDL_bool
++SDL_HasARMSIMD(void)
++{
++    return CPU_FEATURE_AVAILABLE(CPU_HAS_ARM_SIMD);
++}
++
++SDL_bool
+ SDL_HasNEON(void)
+ {
+     return CPU_FEATURE_AVAILABLE(CPU_HAS_NEON);
+@@ -846,6 +900,7 @@ main()
+     printf("AVX: %d\n", SDL_HasAVX());
+     printf("AVX2: %d\n", SDL_HasAVX2());
+     printf("AVX-512F: %d\n", SDL_HasAVX512F());
++    printf("ARM SIMD: %d\n", SDL_HasARMSIMD());
+     printf("NEON: %d\n", SDL_HasNEON());
+     printf("RAM: %d MB\n", SDL_GetSystemRAM());
+     return 0;
+-- 
+2.11.0
+

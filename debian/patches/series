@@ -1,2 +1,13 @@
 no-libdir.patch
 fix-cross-building-907711.patch
+0001-ARM-Create-configure-option-enable-arm-simd-to-gover.patch
+0002-ARM-SIMD-assembly-optimization-for-function-BlitRGBt.patch
+0003-ARM-SIMD-assembly-optimization-for-function-BlitARGB.patch
+0004-SDL_blit-use-a-named-enum-for-required-hardware-feat.patch
+0005-ARM-SIMD-assembly-optimization-for-BGR-to-RGB-32bpp-.patch
+0006-ARM-assembly-optimization-for-SDL_FillRect.patch
+0007-ARM-SIMD-optimization-for-4-4-4-4-to-8-8-8-8-normal-.patch
+0008-ARM-Create-configure-option-enable-arm-neon-to-gover.patch
+0009-ARM-NEON-assembly-optimization-for-function-BlitRGBt.patch
+0010-ARM-NEON-assembly-optimization-for-function-BlitARGB.patch
+0011-ARM-NEON-assembly-optimization-for-SDL_FillRect.patch

@@ -1,0 +1,162 @@
+From 3aa4b734689aaed4857db03525c929e85ccb4d87 Mon Sep 17 00:00:00 2001
+From: Ben Avison <bavison@riscosopen.org>
+Date: Thu, 8 Nov 2018 18:00:15 +0000
+Subject: [PATCH 10/11] ARM: NEON assembly optimization for function
+ BlitARGBto565PixelAlpha
+
+---
+ src/video/SDL_blit_A.c              | 30 +++++++++++--
+ src/video/arm/pixman-arm-neon-asm.S | 88 +++++++++++++++++++++++++++++++++++++
+ 2 files changed, 114 insertions(+), 4 deletions(-)
+
+diff --git a/src/video/SDL_blit_A.c b/src/video/SDL_blit_A.c
+index d17091a84..2089774b2 100644
+--- a/src/video/SDL_blit_A.c
++++ b/src/video/SDL_blit_A.c
+@@ -422,6 +422,21 @@ BlitRGBtoRGBPixelAlphaARMSIMD(SDL_BlitInfo * info)
+ #endif
+ 
+ #if SDL_ARM_NEON_BLITTERS
++void BlitARGBto565PixelAlphaARMNEONAsm(int32_t w, int32_t h, uint16_t *dst, int32_t dst_stride, uint32_t *src, int32_t src_stride);
++
++static void
++BlitARGBto565PixelAlphaARMNEON(SDL_BlitInfo * info)
++{
++    int32_t width = info->dst_w;
++    int32_t height = info->dst_h;
++    uint16_t *dstp = (uint16_t *)info->dst;
++    int32_t dststride = width + (info->dst_skip >> 1);
++    uint32_t *srcp = (uint32_t *)info->src;
++    int32_t srcstride = width + (info->src_skip >> 2);
++
++    BlitARGBto565PixelAlphaARMNEONAsm(width, height, dstp, dststride, srcp, srcstride);
++}
++
+ void BlitRGBtoRGBPixelAlphaARMNEONAsm(int32_t w, int32_t h, uint32_t *dst, int32_t dst_stride, uint32_t *src, int32_t src_stride);
+ 
+ static void
+@@ -1328,14 +1343,21 @@ SDL_CalculateBlitA(SDL_Surface * surface)
+             return BlitNto1PixelAlpha;
+ 
+         case 2:
+-#if SDL_ARM_SIMD_BLITTERS
++#if SDL_ARM_NEON_BLITTERS || SDL_ARM_SIMD_BLITTERS
+                 if (sf->BytesPerPixel == 4 && sf->Amask == 0xff000000
+                     && sf->Gmask == 0xff00 && df->Gmask == 0x7e0
+                     && ((sf->Rmask == 0xff && df->Rmask == 0x1f)
+-                    || (sf->Bmask == 0xff && df->Bmask == 0x1f))
+-                    && SDL_HasARMSIMD())
++                    || (sf->Bmask == 0xff && df->Bmask == 0x1f)))
++                {
++#if SDL_ARM_NEON_BLITTERS
++                    if (SDL_HasNEON())
++                        return BlitARGBto565PixelAlphaARMNEON;
++#endif
++#if SDL_ARM_SIMD_BLITTERS
++                    if (SDL_HasARMSIMD())
+                         return BlitARGBto565PixelAlphaARMSIMD;
+-                else
++#endif
++                }
+ #endif
+                 if (sf->BytesPerPixel == 4 && sf->Amask == 0xff000000
+                     && sf->Gmask == 0xff00
+diff --git a/src/video/arm/pixman-arm-neon-asm.S b/src/video/arm/pixman-arm-neon-asm.S
+index 72fd3a2b4..1fcf3c117 100644
+--- a/src/video/arm/pixman-arm-neon-asm.S
++++ b/src/video/arm/pixman-arm-neon-asm.S
+@@ -157,3 +157,91 @@ generate_composite_function \
+     RGBtoRGBPixelAlpha_process_pixblock_head, \
+     RGBtoRGBPixelAlpha_process_pixblock_tail, \
+     RGBtoRGBPixelAlpha_process_pixblock_tail_head
++
++ /******************************************************************************/
++
++.macro ARGBto565PixelAlpha_process_pixblock_head
++    vmvn        d6, d3
++    vshr.u8     d1, #2
++    vshr.u8     d3, #3
++    vshr.u8     d0, #3
++    vshrn.u16   d7, q2, #3
++    vshrn.u16   d25, q2, #8
++    vbic.i16    q2, #0xe0
++    vshr.u8     d6, #3
++    vshr.u8     d7, #2
++    vshr.u8     d2, #3
++    vmovn.u16   d24, q2
++    vshr.u8     d25, #3
++    vmull.u8    q13, d1, d3
++    vmlal.u8    q13, d7, d6
++    vmull.u8    q14, d0, d3
++    vmlal.u8    q14, d24, d6
++    vmull.u8    q15, d2, d3
++    vmlal.u8    q15, d25, d6
++.endm
++
++.macro ARGBto565PixelAlpha_process_pixblock_tail
++    vsra.u16    q13, #5
++    vsra.u16    q14, #5
++    vsra.u16    q15, #5
++    vrshr.u16   q13, #5
++    vrshr.u16   q14, #5
++    vrshr.u16   q15, #5
++    vsli.u16    q14, q13, #5
++    vsli.u16    q14, q15, #11
++.endm
++
++.macro ARGBto565PixelAlpha_process_pixblock_tail_head
++    vld4.8      {d0-d3}, [SRC]!
++                                    PF add PF_X, PF_X, #8
++        vsra.u16    q13, #5
++                                    PF tst PF_CTL, #0xF
++        vsra.u16    q14, #5
++                                    PF addne PF_X, PF_X, #8
++        vsra.u16    q15, #5
++                                    PF subne PF_CTL, PF_CTL, #1
++        vrshr.u16   q13, #5
++                                    PF cmp PF_X, ORIG_W
++        vrshr.u16   q14, #5
++                                    PF pld, [PF_SRC, PF_X, lsl #src_bpp_shift]
++        vrshr.u16   q15, #5
++                                    PF pld, [PF_DST, PF_X, lsl #dst_bpp_shift]
++    vld1.8      {d4-d5}, [DST_R]!
++                                    PF subge PF_X, PF_X, ORIG_W
++        vsli.u16    q14, q13, #5
++                                    PF subges PF_CTL, PF_CTL, #0x10
++        vsli.u16    q14, q15, #11
++                                    PF ldrgeb DUMMY, [PF_SRC, SRC_STRIDE, lsl #src_bpp_shift]!
++        vst1.8      {q14}, [DST_W :128]!
++    vmvn        d6, d3
++    vshr.u8     d1, #2
++    vshr.u8     d3, #3
++    vshr.u8     d0, #3
++    vshrn.u16   d7, q2, #3
++    vshrn.u16   d25, q2, #8
++    vbic.i16    q2, #0xe0
++                                    PF ldrgeb DUMMY, [PF_DST, DST_STRIDE, lsl #dst_bpp_shift]!
++    vshr.u8     d6, #3
++    vshr.u8     d7, #2
++    vshr.u8     d2, #3
++    vmovn.u16   d24, q2
++    vshr.u8     d25, #3
++    vmull.u8    q13, d1, d3
++    vmlal.u8    q13, d7, d6
++    vmull.u8    q14, d0, d3
++    vmlal.u8    q14, d24, d6
++    vmull.u8    q15, d2, d3
++    vmlal.u8    q15, d25, d6
++.endm
++
++generate_composite_function \
++    BlitARGBto565PixelAlphaARMNEONAsm, 32, 0, 16, \
++    FLAG_DST_READWRITE | FLAG_DEINTERLEAVE_32BPP, \
++    8, /* number of pixels, processed in a single block */ \
++    6, /* prefetch distance */ \
++    default_init, \
++    default_cleanup, \
++    ARGBto565PixelAlpha_process_pixblock_head, \
++    ARGBto565PixelAlpha_process_pixblock_tail, \
++    ARGBto565PixelAlpha_process_pixblock_tail_head
+-- 
+2.11.0
+

@@ -1,3 +1,9 @@
+libsdl2 (2.0.9+dfsg1-1+rpt1) buster; urgency=medium
+
+  * Add Avison patches from stretch version
+
+ -- Simon Long <simon@raspberrypi.org>  Thu, 25 Apr 2019 15:18:04 +0100
+
 libsdl2 (2.0.9+dfsg1-1) unstable; urgency=medium
 
   * New upstream release. (Closes: #914251)
