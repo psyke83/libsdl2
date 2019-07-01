@@ -1,0 +1,25 @@
+Description: Revert: https://github.com/RetroPie/SDL-mirror/commit/4cb7923f251543c1175c1702f8cf8b4201ce9054
+Author: Jools Wills <buzz@exotica.org.uk>
+
+--- libsdl2-2.0.9+dfsg1.orig/src/joystick/linux/SDL_sysjoystick.c
++++ libsdl2-2.0.9+dfsg1/src/joystick/linux/SDL_sysjoystick.c
+@@ -670,7 +670,7 @@ ConfigJoystick(SDL_Joystick * joystick,
+                 ++joystick->nbuttons;
+             }
+         }
+-        for (i = 0; i < ABS_MAX; ++i) {
++        for (i = 0; i < ABS_MISC; ++i) {
+             /* Skip hats */
+             if (i == ABS_HAT0X) {
+                 i = ABS_HAT3Y;
+@@ -976,6 +976,10 @@ HandleInputEvents(SDL_Joystick * joystic
+                                           events[i].value);
+                 break;
+             case EV_ABS:
++                if (code >= ABS_MISC) {
++                    break;
++                }
++
+                 switch (code) {
+                 case ABS_HAT0X:
+                 case ABS_HAT0Y:

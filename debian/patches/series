@@ -12,3 +12,4 @@ fix-cross-building-907711.patch
 0010-ARM-NEON-assembly-optimization-for-function-BlitARGB.patch
 0011-ARM-NEON-assembly-optimization-for-SDL_FillRect.patch
 implement-mali-video-driver.patch
+revert-axis-namespace.patch
