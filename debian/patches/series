@@ -13,3 +13,4 @@ fix-cross-building-907711.patch
 0011-ARM-NEON-assembly-optimization-for-SDL_FillRect.patch
 implement-mali-video-driver.patch
 revert-axis-namespace.patch
+fix-joy-events-after-close.patch

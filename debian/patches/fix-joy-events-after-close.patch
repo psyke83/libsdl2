@@ -1,0 +1,23 @@
+Description: fix sdl2 joystick events after joystick closed
+Author: Nicolas Adenis-Lamarre <nicolas.adenis.lamarre@gmail.com>
+
+--- libsdl2-2.0.9+dfsg1.orig/src/joystick/SDL_joystick.c
++++ libsdl2-2.0.9+dfsg1/src/joystick/SDL_joystick.c
+@@ -1035,7 +1035,7 @@ SDL_JoystickUpdate(void)
+             if (joystick->delayed_guide_button) {
+                 SDL_GameControllerHandleDelayedGuideButton(joystick);
+             }
+-        }
++
+ 
+         if (joystick->force_recentering) {
+             /* Tell the app that everything is centered/unpressed... */
+@@ -1055,6 +1055,8 @@ SDL_JoystickUpdate(void)
+ 
+             joystick->force_recentering = SDL_FALSE;
+         }
++
++	}
+     }
+ 
+     SDL_LockJoysticks();
