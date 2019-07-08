@@ -14,3 +14,4 @@ fix-cross-building-907711.patch
 implement-mali-video-driver.patch
 revert-axis-namespace.patch
 fix-joy-events-after-close.patch
+rpivideo-dispmanx-scaling.patch
