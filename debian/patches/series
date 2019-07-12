@@ -15,3 +15,4 @@ implement-mali-video-driver.patch
 revert-axis-namespace.patch
 fix-joy-events-after-close.patch
 rpivideo-dispmanx-scaling.patch
+SDL_CreateWindow-bug-4349.patch

@@ -1,0 +1,97 @@
+
+# HG changeset patch
+# User Sam Lantinga <slouken@libsdl.org>
+# Date 1541024211 25200
+# Node ID cfc65d4d49aeef36565748be45c9725474ad48af
+# Parent  d9a16c76d8d1df409117ac19c4dfcf77b2096fd1
+Fixed bug 4349 - SDL_CreateWindow fails with KMS/DRM after upgrading Mesa to 18.2.3
+
+Rainer Sabelka
+
+After I did an upgrade of my arch Linux installation (resulting in an update of Mesa to version 18.2.3), all my SDL2 applications which use the KMS/DRM driver stopped working.
+Reason: Creating a Window with SDL_CreateWindow failed because the call to EGL
+eglCreateWindowSurface() returns an error "EGL_BAD_MATCH".
+After investigating with the debugger I figured, that the configuration, which has been selected from the output of eglChooseConfig(), has an "EGL_NATIVE_VISUAL_ID" which does not match the "format" of the underlying gbm surface.
+
+The attached patch fixes the problem. It does so, by mimicking Weston's behavior.
+All configurations returned from eglChooseConfig() which have an visual_id different from the gbm format are discarded, and only from the remaining ones the "best" match is selected.
+
+diff -r d9a16c76d8d1 -r cfc65d4d49ae src/video/SDL_egl.c
+--- a/src/video/SDL_egl.c	Wed Oct 31 15:01:20 2018 -0700
++++ b/src/video/SDL_egl.c	Wed Oct 31 15:16:51 2018 -0700
+@@ -449,6 +449,12 @@
+     return 0;
+ }
+ 
++void
++SDL_EGL_SetRequiredVisualId(_THIS, int visual_id) 
++{
++    _this->egl_data->egl_required_visual_id=visual_id;
++}
++
+ #ifdef DUMP_EGL_CONFIG
+ 
+ #define ATTRIBUTE(_attr) { _attr, #_attr }
+@@ -513,14 +519,8 @@
+ /* 64 seems nice. */
+     EGLint attribs[64];
+     EGLint found_configs = 0, value;
+-#ifdef SDL_VIDEO_DRIVER_KMSDRM
+-    /* Intel EGL on KMS/DRM (al least) returns invalid configs that confuse the bitdiff search used */
+-    /* later in this function, so we simply use the first one when using the KMSDRM driver for now. */
+-    EGLConfig configs[1];
+-#else
+     /* 128 seems even nicer here */
+     EGLConfig configs[128];
+-#endif
+     int i, j, best_bitdiff = -1, bitdiff;
+    
+     if (!_this->egl_data) {
+@@ -603,6 +603,16 @@
+     /* From those, we select the one that matches our requirements more closely via a makeshift algorithm */
+ 
+     for (i = 0; i < found_configs; i++ ) {
++        if (_this->egl_data->egl_required_visual_id)
++        {
++            EGLint format;
++            _this->egl_data->eglGetConfigAttrib(_this->egl_data->egl_display,
++                                            configs[i], 
++                                            EGL_NATIVE_VISUAL_ID, &format);
++            if (_this->egl_data->egl_required_visual_id != format)
++                continue;
++        }
++
+         bitdiff = 0;
+         for (j = 0; j < SDL_arraysize(attribs) - 1; j += 2) {
+             if (attribs[j] == EGL_NONE) {
+diff -r d9a16c76d8d1 -r cfc65d4d49ae src/video/SDL_egl_c.h
+--- a/src/video/SDL_egl_c.h	Wed Oct 31 15:01:20 2018 -0700
++++ b/src/video/SDL_egl_c.h	Wed Oct 31 15:16:51 2018 -0700
+@@ -37,6 +37,7 @@
+     int egl_swapinterval;
+     int egl_surfacetype;
+     int egl_version_major, egl_version_minor;
++    EGLint egl_required_visual_id;
+     
+     EGLDisplay(EGLAPIENTRY *eglGetDisplay) (NativeDisplayType display);
+     EGLDisplay(EGLAPIENTRY *eglGetPlatformDisplay) (EGLenum platform,
+@@ -102,6 +103,7 @@
+ extern int SDL_EGL_LoadLibrary(_THIS, const char *path, NativeDisplayType native_display, EGLenum platform);
+ extern void *SDL_EGL_GetProcAddress(_THIS, const char *proc);
+ extern void SDL_EGL_UnloadLibrary(_THIS);
++extern void SDL_EGL_SetRequiredVisualId(_THIS, int visual_id);
+ extern int SDL_EGL_ChooseConfig(_THIS);
+ extern int SDL_EGL_SetSwapInterval(_THIS, int interval);
+ extern int SDL_EGL_GetSwapInterval(_THIS);
+diff -r d9a16c76d8d1 -r cfc65d4d49ae src/video/kmsdrm/SDL_kmsdrmvideo.c
+--- a/src/video/kmsdrm/SDL_kmsdrmvideo.c	Wed Oct 31 15:01:20 2018 -0700
++++ b/src/video/kmsdrm/SDL_kmsdrmvideo.c	Wed Oct 31 15:16:51 2018 -0700
+@@ -587,6 +587,7 @@
+             goto error;
+         }
+     }
++    SDL_EGL_SetRequiredVisualId(_this, surface_fmt);
+     wdata->egl_surface = SDL_EGL_CreateSurface(_this, (NativeWindowType) wdata->gs);
+ 
+     if (wdata->egl_surface == EGL_NO_SURFACE) {
+
